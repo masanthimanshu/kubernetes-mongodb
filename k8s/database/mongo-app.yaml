@@ -28,6 +28,9 @@ spec:
                 secretKeyRef:
                   name: k8s-secrets
                   key: mongo-root-password
+          volumeMounts:
+            - name: mongo-storage
+              mountPath: /data/db
           resources:
             requests:
               cpu: 250m
@@ -35,3 +38,7 @@ spec:
             limits:
               cpu: 500m
               memory: 1Gi
+      volumes:
+        - name: mongo-storage
+          persistentVolumeClaim:
+            claimName: mongo-volume
