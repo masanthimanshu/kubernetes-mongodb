@@ -19,24 +19,24 @@ spec:
             - name: ME_CONFIG_MONGODB_ADMINUSERNAME
               valueFrom:
                 secretKeyRef:
-                  name: k8s-secrets
+                  name: secrets
                   key: mongo-root-username
             - name: ME_CONFIG_MONGODB_ADMINPASSWORD
               valueFrom:
                 secretKeyRef:
-                  name: k8s-secrets
+                  name: secrets
                   key: mongo-root-password
             - name: ME_CONFIG_MONGODB_SERVER
               value: mongo-service
             - name: ME_CONFIG_BASICAUTH_USERNAME
               valueFrom:
                 secretKeyRef:
-                  name: k8s-secrets
+                  name: secrets
                   key: web-username
             - name: ME_CONFIG_BASICAUTH_PASSWORD
               valueFrom:
                 secretKeyRef:
-                  name: k8s-secrets
+                  name: secrets
                   key: web-password
           resources:
             requests:

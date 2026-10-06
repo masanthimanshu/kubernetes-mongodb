@@ -1,291 +1,234 @@
-# Kubernetes MongoDB & Mongo Express Stack
+# MongoDB & Mongo Express on Kubernetes (Kind)
 
-[![Kubernetes](https://img.shields.io/badge/Kubernetes-v1.28+-326CE5?style=flat-square&logo=kubernetes&logoColor=white)](https://kubernetes.io/)
-[![KinD](https://img.shields.io/badge/KinD-Cluster-2B579A?style=flat-square&logo=docker&logoColor=white)](https://kind.sigs.k8s.io/)
-[![MongoDB](https://img.shields.io/badge/MongoDB-latest-47A248?style=flat-square&logo=mongodb&logoColor=white)](https://www.mongodb.com/)
-[![Mongo_Express](https://img.shields.io/badge/Mongo_Express-Web_UI-black?style=flat-square)](https://github.com/mongo-express/mongo-express)
+[![Kubernetes](https://img.shields.io/badge/Kubernetes-v1.28+-326CE5?logo=kubernetes&logoColor=white)](https://kubernetes.io/)
+[![Kind](https://img.shields.io/badge/Kind-Cluster-blue?logo=docker&logoColor=white)](https://kind.sigs.k8s.io/)
+[![MongoDB](https://img.shields.io/badge/MongoDB-Latest-47A248?logo=mongodb&logoColor=white)](https://www.mongodb.com/)
+[![Mongo Express](https://img.shields.io/badge/Mongo--Express-Web_UI-000000?logo=express&logoColor=white)](https://github.com/mongo-express/mongo-express)
 
-A production-style local Kubernetes development setup deploying a secured **MongoDB** instance with persistent volume storage and a scalable **Mongo Express** administrative web dashboard, orchestrated on a **KinD (Kubernetes in Docker)** cluster.
+A reproducible local Kubernetes environment deploying a persistent **MongoDB** instance paired with the **Mongo Express** web-based management UI using **Kind** (Kubernetes in Docker).
 
 ---
 
 ## Table of Contents
 
-- [Overview](#overview)
-- [Architecture](#architecture)
-- [Key Features](#key-features)
-- [Project Structure](#project-structure)
-- [Prerequisites](#prerequisites)
-- [Quick Start](#quick-start)
-- [Manual Step-by-Step Deployment](#manual-step-by-step-deployment)
+- [What the Project Does](#what-the-project-does)
+- [Why the Project Is Useful](#why-the-project-is-useful)
+- [Architecture Overview](#architecture-overview)
+- [Repository Structure](#repository-structure)
+- [Getting Started](#getting-started)
+  - [Prerequisites](#prerequisites)
+  - [Quickstart (Automated)](#quickstart-automated)
+  - [Manual Step-by-Step Deployment](#manual-step-by-step-deployment)
 - [Access & Credentials](#access--credentials)
-- [Verification & Health Checks](#verification--health-checks)
-- [Teardown & Cleanup](#teardown--cleanup)
-- [Support](#support)
+- [Verification & Useful Commands](#verification--useful-commands)
+- [Tearing Down](#tearing-down)
+- [Where to Get Help](#where-to-get-help)
 - [Contributing](#contributing)
 
 ---
 
-## Overview
+## What the Project Does
 
-This repository provides declarative Kubernetes manifests and automation scripts to run a two-tier database and management application locally:
+This project provides a clean, modular Kubernetes setup to run a local database stack on a [Kind](https://kind.sigs.k8s.io/) cluster. It automates:
 
-- **MongoDB**: A single-replica stateful database deployment backed by a Kubernetes `PersistentVolume` (`hostPath`) and `PersistentVolumeClaim`.
-- **Mongo Express**: A 2-replica web-based administrative interface exposed through a `NodePort` service, mapped directly to host port `30081` via KinD port-mapping.
-- **Security**: Centralized credential management using Kubernetes `Secret` resources for both database authentication and web UI basic auth.
+1. **Kind Cluster Provisioning**: Creates a cluster (`mongo-cluster`) configured with host-to-container port mapping and volume mounts.
+2. **Persistent Storage**: Sets up a local `PersistentVolume` and `PersistentVolumeClaim` mapped to host storage (`/tmp/mongo-data`), ensuring database records persist across pod restarts.
+3. **MongoDB Deployment**: Runs a single-replica MongoDB container with configured resource limits and credential injection via Kubernetes Secrets.
+4. **Mongo Express UI**: Deploys a high-availability, 2-replica Mongo Express web interface connected to the database via internal DNS.
+5. **NodePort Expose**: Exposes Mongo Express via NodePort `30081`, accessible directly from the host machine at `http://localhost:30081`.
 
 ---
 
-## Architecture
+## Why the Project Is Useful
+
+- **Zero-Friction Local Testing**: Quickly spin up or tear down a realistic Kubernetes database setup without managing cloud infrastructure or paying for managed clusters.
+- **Production-Like Separation of Concerns**: Manifests are organized into dedicated directories (`app`, `database`, `volume`) following infrastructure-as-code best practices.
+- **Persistent Data**: Database state is preserved in host storage (`/tmp/mongo-data`) through Kubernetes Persistent Volumes.
+- **Secure Secrets Management**: Database and web administrative passwords are separated into Kubernetes Secret objects rather than hardcoded into deployment specs.
+- **Automated Rollout**: Includes a turnkey deployment script (`run.sh`) that provisions the cluster, applies manifests in dependency order, and waits for deployment readiness before completing.
+
+---
+
+## Architecture Overview
 
 ```mermaid
 flowchart LR
-    subgraph Host ["Local Workstation"]
-        Browser["Web Browser\nhttp://localhost:30081"]
-    end
-
-    subgraph KinD ["KinD Cluster (mongo-cluster)"]
-        NodePort["NodePort Service: 30081\n(mongo-express-service)"]
-
-        subgraph AppTier ["App Tier"]
-            ME1["Mongo Express Pod 1"]
-            ME2["Mongo Express Pod 2"]
-        end
-
-        subgraph DBTier ["Database Tier"]
-            MongoSVC["ClusterIP Service: 27017\n(mongo-service)"]
-            MongoPod["MongoDB Pod\n(mongo-deployment)"]
-        end
-
-        subgraph StorageTier ["Storage Tier"]
-            PVC["PersistentVolumeClaim\n(mongo-volume)"]
-            PV["PersistentVolume\n(mongo-pv: 2Gi)"]
-        end
-
-        Secret["Secret: k8s-secrets\n(User/Pass)"]
-    end
-
-    subgraph LocalDisk ["Host Storage"]
-        HostDir["/tmp/mongo-data"]
-    end
-
-    Browser -->|HostPort 30081| NodePort
-    NodePort --> ME1
-    NodePort --> ME2
-    ME1 -->|Internal DNS| MongoSVC
-    ME2 -->|Internal DNS| MongoSVC
-    MongoSVC --> MongoPod
-    MongoPod --> PVC
-    PVC --> PV
-    PV --> HostDir
-    Secret -.->|Injected Env| MongoPod
-    Secret -.->|Injected Env| ME1
-    Secret -.->|Injected Env| ME2
+    User([Browser / Host]) -->|http://localhost:30081| NodePort[NodePort Service :30081]
+    NodePort -->|Port 8081| ME[Mongo Express Pods (2 Replicas)]
+    ME -->|Port 27017| MongoSvc[ClusterIP Service: mongo-service]
+    MongoSvc --> MongoPod[MongoDB Pod]
+    MongoPod -->|/data/db| PVC[PersistentVolumeClaim: mongo-volume]
+    PVC --> PV[PersistentVolume: mongo-pv]
+    PV --> HostDir[Host Path: /tmp/mongo-data]
+    Secret[K8s Secret: secrets] -.->|Injects Credentials| ME
+    Secret -.->|Injects Credentials| MongoPod
 ```
 
 ---
 
-## Key Features
-
-- **Automated Cluster & Stack Provisioning**: Single-script deployment via [`run.sh`](run.sh) handling cluster creation, manifest application, and pod readiness checks.
-- **Persistent Data Storage**: Uses a dedicated `PersistentVolume` mapped to `/tmp/mongo-data`, ensuring database records persist across pod restarts and deployments.
-- **High Availability Web Dashboard**: Multi-replica (2 pods) Mongo Express frontend with internal load balancing.
-- **Integrated Port Forwarding**: KinD control-plane extra port mapping routes port `30081` seamlessly from host to node without requiring `kubectl port-forward`.
-- **Resource Constraints**: Defined CPU and memory requests (`250m`, `512Mi`) and limits (`500m`, `1Gi`) for deterministic performance.
-
----
-
-## Project Structure
+## Repository Structure
 
 ```text
 .
 ├── k8s/
-│   ├── k8s-cluster.yaml            # KinD cluster spec with port 30081 mapping
-│   ├── k8s-secrets.yaml            # Kubernetes Secret containing authentication credentials
 │   ├── app/
-│   │   ├── mongo-express-app.yaml     # Mongo Express Deployment (2 replicas)
-│   │   └── mongo-express-service.yaml # NodePort Service exposing Mongo Express
+│   │   ├── mongo-express-app.yaml       # Deployment for Mongo Express (2 replicas)
+│   │   └── mongo-express-service.yaml   # NodePort service exposing port 30081
 │   ├── database/
-│   │   ├── mongo-app.yaml             # MongoDB Deployment with volume mount
-│   │   └── mongo-service.yaml         # Internal ClusterIP Service for MongoDB
-│   └── volume/
-│       ├── mongo-volume.yaml          # PersistentVolume specification (2Gi hostPath)
-│       └── mongo-volume-claim.yaml    # PersistentVolumeClaim for MongoDB
-├── run.sh                          # One-click bootstrap and verification script
-└── README.md                       # Project documentation
+│   │   ├── mongo-app.yaml               # Deployment for MongoDB (1 replica)
+│   │   └── mongo-service.yaml           # Internal ClusterIP service (port 27017)
+│   ├── volume/
+│   │   ├── mongo-volume.yaml            # PersistentVolume mapped to /tmp/mongo-data
+│   │   └── mongo-volume-claim.yaml      # PersistentVolumeClaim requesting 2Gi storage
+│   ├── control-plane.yaml               # Kind cluster config (port mappings & extra mounts)
+│   └── secrets.yaml                     # Kubernetes Secret for auth credentials
+├── run.sh                               # Automated cluster bootstrap & deploy script
+└── README.md                            # Project documentation
 ```
 
 ---
 
-## Prerequisites
+## Getting Started
 
-Ensure you have the following CLI tools installed and running on your system:
+### Prerequisites
 
-| Tool        | Minimum Version | Installation Link                                                                         |
-| :---------- | :-------------- | :---------------------------------------------------------------------------------------- |
-| **Docker**  | 20.10+          | [docs.docker.com/get-docker](https://docs.docker.com/get-docker/)                         |
-| **KinD**    | 0.20+           | [kind.sigs.k8s.io/docs/user/quick-start](https://kind.sigs.k8s.io/docs/user/quick-start/) |
-| **kubectl** | 1.25+           | [kubernetes.io/docs/tasks/tools](https://kubernetes.io/docs/tasks/tools/)                 |
+Ensure you have the following installed on your host system:
 
----
+- [Docker](https://docs.docker.com/get-docker/) (running and accessible)
+- [kind](https://kind.sigs.k8s.io/docs/user/quick-start/#installation) (`kind` CLI v0.20+)
+- [kubectl](https://kubernetes.io/docs/tasks/tools/) (Kubernetes CLI)
+- **Bash** shell (macOS / Linux / WSL)
 
-## Quick Start
+### Quickstart (Automated)
 
-1. **Clone the repository:**
-
-   ```bash
-   git clone <repository-url>
-   cd hitesh-dev
-   ```
-
-2. **Make the bootstrap script executable:**
-
-   ```bash
-   chmod +x run.sh
-   ```
-
-3. **Execute the setup script:**
-
-   ```bash
-   ./run.sh
-   ```
-
-   The script automatically:
-   - Verifies if the KinD cluster `mongo-cluster` exists; if not, creates it using [`k8s/k8s-cluster.yaml`](k8s/k8s-cluster.yaml).
-   - Applies secrets, volumes, database, and application manifests.
-   - Waits for all pods to reach `Ready` status.
-   - Outputs the web dashboard URL.
-
-4. **Access the dashboard:**
-   Open [http://localhost:30081](http://localhost:30081) in your browser.
-
----
-
-## Manual Step-by-Step Deployment
-
-If you prefer applying configurations individually or wish to inspect each component:
-
-### 1. Create the KinD Cluster
+Run the bootstrap script from the project root:
 
 ```bash
-kind create cluster --name mongo-cluster --config k8s/k8s-cluster.yaml
+chmod +x run.sh
+./run.sh
 ```
 
-### 2. Create Secrets
+The script will:
+1. Verify if `mongo-cluster` exists; if not, create it using `k8s/control-plane.yaml`.
+2. Apply the secrets, volumes, database manifests, and app manifests.
+3. Wait for pod rollouts to complete.
+4. Output the web access URL.
 
+Once the script completes, open `http://localhost:30081` in your browser.
+
+---
+
+### Manual Step-by-Step Deployment
+
+If you prefer applying manifests individually:
+
+#### 1. Create the Kind Cluster
 ```bash
-kubectl apply -f k8s/k8s-secrets.yaml
+kind create cluster --name mongo-cluster --config k8s/control-plane.yaml
 ```
 
-### 3. Provision Storage
+#### 2. Apply Kubernetes Secrets
+```bash
+kubectl apply -f k8s/secrets.yaml
+```
 
+#### 3. Provision Storage (PV & PVC)
 ```bash
 kubectl apply -f k8s/volume/
 ```
 
-### 4. Deploy MongoDB
-
+#### 4. Deploy MongoDB & ClusterIP Service
 ```bash
 kubectl apply -f k8s/database/
 ```
 
-### 5. Deploy Mongo Express Web UI
-
+#### 5. Deploy Mongo Express & NodePort Service
 ```bash
 kubectl apply -f k8s/app/
 ```
 
-### 6. Wait for Rollout Completion
-
+#### 6. Wait for Deployments to Roll Out
 ```bash
-kubectl rollout status deployment/mongo-deployment
-kubectl rollout status deployment/mongo-express-deployment
+kubectl rollout status deployment/mongo-deployment --timeout=180s
+kubectl rollout status deployment/mongo-express-deployment --timeout=180s
 ```
 
 ---
 
 ## Access & Credentials
 
-Default credentials configured in [`k8s/k8s-secrets.yaml`](k8s/k8s-secrets.yaml):
+When navigating to `http://localhost:30081`, you will be prompted for HTTP Basic Authentication.
 
-### Mongo Express Web Dashboard (HTTP Basic Auth)
+| Component | Username | Password | Defined In |
+| :--- | :--- | :--- | :--- |
+| **Mongo Express UI (Web Auth)** | `user` | `pass` | `k8s/secrets.yaml` (`web-*`) |
+| **MongoDB Root Database** | `mongo-user` | `mongo-pass` | `k8s/secrets.yaml` (`mongo-root-*`) |
 
-- **URL**: [http://localhost:30081](http://localhost:30081)
-- **Username**: `user`
-- **Password**: `pass`
-
-### MongoDB Root Database Credentials
-
-- **Host**: `mongo-service` (internal port `27017`)
-- **Username**: `mongo-user`
-- **Password**: `mongo-pass`
-
-> [!WARNING]
-> These credentials are for local development and demonstration purposes only. Do not use default credentials in production environments. Update [`k8s/k8s-secrets.yaml`](k8s/k8s-secrets.yaml) before deployment in shared or public environments.
+> **Warning**: The default credentials in `k8s/secrets.yaml` are intended for local development only. Do not use these default values in shared or production environments.
 
 ---
 
-## Verification & Health Checks
+## Verification & Useful Commands
 
-Verify your deployment status with standard `kubectl` commands:
+Check the running pods, services, and volume status:
 
 ```bash
-# Check Pod status (Expected: 1 mongo pod, 2 mongo-express pods running)
-kubectl get pods -o wide
+# View all pods and their status
+kubectl get pods
 
-# Check Services and Port Mappings
+# View services and exposed ports
 kubectl get svc
 
-# Inspect Persistent Volumes and Claims
+# Inspect PersistentVolume and PVC bindings
 kubectl get pv,pvc
 
-# Stream MongoDB logs
-kubectl logs -l app=mongo -f
+# Stream logs from Mongo Express
+kubectl logs -l app=mongo-express --tail=50 -f
 
-# Stream Mongo Express logs
-kubectl logs -l app=mongo-express -f
+# Stream logs from MongoDB
+kubectl logs -l app=mongo --tail=50 -f
 ```
 
 ---
 
-## Teardown & Cleanup
+## Tearing Down
 
-### Option 1: Delete all Kubernetes Resources (Keep Cluster)
+To delete the resources or completely remove the Kind cluster:
 
+### Option 1: Delete Kubernetes Workloads (Keep Cluster)
 ```bash
-kubectl delete -f k8s/app/ -f k8s/database/ -f k8s/volume/ -f k8s/k8s-secrets.yaml
+kubectl delete -f k8s/app/ -f k8s/database/ -f k8s/volume/ -f k8s/secrets.yaml
 ```
 
-### Option 2: Delete Entire KinD Cluster
-
+### Option 2: Delete Entire Kind Cluster
 ```bash
 kind delete cluster --name mongo-cluster
 ```
 
-To remove persisted MongoDB data from your host machine:
-
+To clean up persistent host data as well:
 ```bash
 rm -rf /tmp/mongo-data
 ```
 
 ---
 
-## Support
+## Where to Get Help
 
 - **Kubernetes Documentation**: [kubernetes.io/docs](https://kubernetes.io/docs/)
-- **KinD Documentation**: [kind.sigs.k8s.io](https://kind.sigs.k8s.io/)
-- **Mongo Express Issues**: [github.com/mongo-express/mongo-express/issues](https://github.com/mongo-express/mongo-express/issues)
-
-If you encounter issues specific to this project, please open an issue in this repository.
+- **Kind (Kubernetes in Docker)**: [kind.sigs.k8s.io](https://kind.sigs.k8s.io/)
+- **Mongo Express Official Repo**: [github.com/mongo-express/mongo-express](https://github.com/mongo-express/mongo-express)
+- **MongoDB Docker Hub**: [hub.docker.com/_/mongo](https://hub.docker.com/_/mongo)
+- **Issues**: Open an issue in this repository for any bugs or questions.
 
 ---
 
 ## Contributing
 
-Contributions, feedback, and enhancements are welcome!
+Contributions are welcome! Please follow these steps:
 
-1. Fork the repository
-2. Create a feature branch (`git checkout -b feature/amazing-feature`)
-3. Commit your changes (`git commit -m "feat: add amazing feature"`)
-4. Push to the branch (`git push origin feature/amazing-feature`)
-5. Open a Pull Request
+1. Fork this repository.
+2. Create a feature branch (`git checkout -b feature/my-feature`).
+3. Validate your changes against a clean Kind cluster using `./run.sh`.
+4. Commit your changes (`git commit -m "Add new feature"`).
+5. Push to your branch (`git push origin feature/my-feature`).
+6. Open a Pull Request describing your changes.

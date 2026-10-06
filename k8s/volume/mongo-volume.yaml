@@ -10,3 +10,4 @@ spec:
   storageClassName: manual
   hostPath:
     path: /tmp/mongo-data
+    type: DirectoryOrCreate

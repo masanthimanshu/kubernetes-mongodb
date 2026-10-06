@@ -6,3 +6,6 @@ nodes:
       - containerPort: 30081
         hostPort: 30081
         protocol: TCP
+    extraMounts:
+      - hostPath: /tmp/mongo-data
+        containerPath: /tmp/mongo-data
